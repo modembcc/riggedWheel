@@ -1,16 +1,27 @@
 <script lang="ts">
-	// Props with $bindable for two-way sync
-	let { open = $bindable(false), header, children, footer, showConfetti = true } = $props();
+	import type { Snippet } from 'svelte';
+
+	let {
+		open = $bindable(false),
+		header,
+		children,
+		footer,
+		showConfetti = true
+	}: {
+		open?: boolean;
+		header?: Snippet;
+		children?: Snippet;
+		footer?: Snippet;
+		showConfetti?: boolean;
+	} = $props();
 
 	let dialog = $state<HTMLDialogElement>();
 	let confettiPieces = $state<Array<{ id: number; left: number; delay: number; color: string }>>(
 		[]
 	);
 
-	// Sync open state with dialog.showModal()/close()
 	$effect(() => {
 		if (!dialog) return;
-
 		if (open) {
 			dialog.showModal();
 			if (showConfetti) generateConfetti();
@@ -19,12 +30,10 @@
 		}
 	});
 
-	// Handle native dialog close event (Escape key, click outside)
 	function handleClose() {
 		open = false;
 	}
 
-	// Generate confetti particles
 	function generateConfetti() {
 		const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#F7DC6F', '#BB8FCE', '#85C1E2'];
 		confettiPieces = Array.from({ length: 50 }, (_, i) => ({
@@ -35,11 +44,8 @@
 		}));
 	}
 
-	// Close when clicking the backdrop (dialog itself)
 	function handleDialogClick(e: MouseEvent) {
-		if (e.target === dialog) {
-			dialog.close();
-		}
+		if (e.target === dialog) handleClose();
 	}
 </script>
 
@@ -58,23 +64,16 @@
 
 	<div class="modal-content">
 		{#if header}
-			<div class="modal-header">
-				{@render header()}
-			</div>
+			<div class="modal-header">{@render header()}</div>
 		{/if}
 
-		<div class="modal-body">
-			{@render children?.()}
-		</div>
+		<div class="modal-body">{@render children?.()}</div>
 
 		{#if footer}
-			<div class="modal-footer">
-				{@render footer()}
-			</div>
+			<div class="modal-footer">{@render footer()}</div>
 		{:else}
-			<!-- Default close button if no footer provided -->
 			<div class="modal-footer">
-				<button class="modal-close-btn" onclick={() => dialog?.close()}> Close </button>
+				<button class="modal-close-btn" onclick={() => dialog?.close()}>Close</button>
 			</div>
 		{/if}
 	</div>
@@ -90,12 +89,10 @@
 		margin: auto;
 		background: transparent;
 	}
-
 	.modal-dialog::backdrop {
 		background: rgba(0, 0, 0, 0.5);
 		animation: fade-in 0.2s ease-out;
 	}
-
 	.modal-content {
 		background: white;
 		border-radius: 1rem;
@@ -104,7 +101,6 @@
 		overflow: hidden;
 		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
 	}
-
 	.modal-header {
 		display: flex;
 		justify-content: space-between;
@@ -113,18 +109,15 @@
 		border-bottom: 2px solid #f0f0f0;
 		margin-bottom: 1rem;
 	}
-
 	.modal-header h2 {
 		margin: 0;
 		font-size: 1.5rem;
 		color: #333;
 	}
-
 	.modal-body {
 		text-align: center;
 		padding: 0.5rem 0;
 	}
-
 	.modal-footer {
 		display: flex;
 		justify-content: center;
@@ -132,7 +125,6 @@
 		border-top: 2px solid #f0f0f0;
 		margin-top: 1rem;
 	}
-
 	.modal-close-btn {
 		padding: 0.6rem 1.5rem;
 		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -144,12 +136,9 @@
 		cursor: pointer;
 		transition: transform 0.2s;
 	}
-
 	.modal-close-btn:hover {
 		transform: translateY(-2px);
 	}
-
-	/* Confetti */
 	.confetti-container {
 		position: absolute;
 		top: 0;
@@ -160,7 +149,6 @@
 		overflow: hidden;
 		z-index: 0;
 	}
-
 	.confetti-piece {
 		position: absolute;
 		width: 10px;
@@ -173,18 +161,14 @@
 		opacity: 0;
 		animation-fill-mode: forwards;
 	}
-
 	.confetti-piece:nth-child(odd) {
 		border-radius: 50%;
 		width: 8px;
 		height: 8px;
 	}
-
-	/* Animations */
 	dialog[open] {
 		animation: zoom 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 	}
-
 	@keyframes zoom {
 		from {
 			transform: scale(0.95);
@@ -195,7 +179,6 @@
 			opacity: 1;
 		}
 	}
-
 	@keyframes fade-in {
 		from {
 			opacity: 0;
@@ -204,7 +187,6 @@
 			opacity: 1;
 		}
 	}
-
 	@keyframes confetti-fall {
 		0% {
 			transform: translateY(-20px) rotate(0deg);
@@ -221,8 +203,6 @@
 			opacity: 0;
 		}
 	}
-
-	/* Mobile */
 	@media (max-width: 480px) {
 		.modal-content {
 			padding: 1.25rem;

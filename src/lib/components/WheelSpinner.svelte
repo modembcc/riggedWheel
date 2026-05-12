@@ -1,138 +1,144 @@
 <script lang="ts">
 	import Modal from './Modal.svelte';
+	import type { RigConfig, SpinResult } from '$lib/types';
+	import {
+		generateSlicePath,
+		getTextPosition,
+		getColorForItem,
+		selectWinner,
+		calculateTargetRotation,
+		calculateRandomRotation
+	} from '$lib/utils';
 
-	// Reactive state using Svelte 5 runes
-	let items = $state<string[]>([]);
-	let newItem = $state('');
+	// Props
+	let {
+		initialItems,
+		rigConfig,
+		onSpinComplete
+	}: {
+		initialItems?: string[];
+		rigConfig?: RigConfig;
+		onSpinComplete?: (result: SpinResult) => void;
+	} = $props();
+
+	// State
+	let items = $state<string[]>(initialItems ?? []);
+	let newItemLabel = $state('');
 	let rotation = $state(0);
 	let isSpinning = $state(false);
-	let spinTimeout;
-	let showModal = $state<boolean>(false);
-	let winner = $state<string | null>(null);
+	let showModal = $state(false);
+	let lastResult = $state<SpinResult | null>(null);
+	let config = $derived<RigConfig>(
+		rigConfig ?? {
+			enabled: false
+		}
+	);
 
-	// Wheel configuration
+	// Config
 	const radius = 150;
 	const centerX = radius + 20;
 	const centerY = radius + 20;
-	const sliceColors = [
-		'#FF6B6B',
-		'#4ECDC4',
-		'#45B7D1',
-		'#FFA07A',
-		'#98D8C8',
-		'#F7DC6F',
-		'#BB8FCE',
-		'#85C1E2'
-	];
+	const spinDuration = 4000;
 
-	// Add a new item to the wheel
-	/**
-	 * @returns {void}
-	 */
+	// Add item
 	function addItem() {
-		const trimmed = newItem.trim();
-		if (trimmed) {
-			items = [...items, trimmed];
-			newItem = '';
-		}
+		const trimmed = newItemLabel.trim();
+		if (!trimmed) return;
+
+		items = [...items, trimmed];
+		newItemLabel = '';
 	}
 
-	// Remove an item from the wheel
-	/**
-	 * @param {number} index
-	 */
-	function removeItem(index: number) {
-		items = items.filter((_, i) => i !== index);
+	function removeItem(id: number) {
+		if (isSpinning) return;
+		items = items.filter((_, index) => index !== id);
 	}
 
-	// Handle keypress in textarea
-	/**
-	 * @param {{ key: string; shiftKey: any; preventDefault: () => void; }} e
-	 */
-	function handleKeydown(e: { key: string; shiftKey: any; preventDefault: () => void }) {
+	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			addItem();
 		}
 	}
 
-	// Spin the wheel!
-	function spinWheel() {
+	// Spin logic with rigging
+	async function spinWheel(event?: MouseEvent) {
 		if (isSpinning || items.length < 2) return;
+
+		// Check for secret rig mode: Ctrl+Shift+Click
+		const isRigMode = event?.ctrlKey && event?.shiftKey;
+		const effectiveRigConfig: RigConfig = isRigMode ? { ...config, enabled: true } : config;
 
 		isSpinning = true;
 
-		const extraSpins = 5 + Math.random() * 5;
-		const randomOffset = Math.random() * 360;
-		const targetRotation = rotation + extraSpins * 360 + randomOffset;
+		// Select winner based on rigging config
+		const winner = selectWinner(items, effectiveRigConfig);
 
-		const duration = 4000;
-		const startTime = performance.now();
-		const startRotation = rotation;
-		const rotationDiff = targetRotation - startRotation;
+		// Calculate target rotation
+		const targetRotation = calculateTargetRotation(winner, items, rotation);
 
-		function animate(currentTime: number) {
-			const elapsed = currentTime - startTime;
-			const progress = Math.min(elapsed / duration, 1);
-			const easeOut = 1 - Math.pow(1 - progress, 3);
-			rotation = startRotation + rotationDiff * easeOut;
+		// Animate
+		await animateSpin(rotation, targetRotation);
 
-			if (progress < 1) {
-				requestAnimationFrame(animate);
-			} else {
-				isSpinning = false;
+		// Complete
+		rotation = targetRotation;
+		isSpinning = false;
 
-				// Calculate winner
-				const normalizedRotation = ((rotation % 360) + 360) % 360;
-				const sliceAngle = 360 / items.length;
-				const winnerIndex =
-					Math.floor(((((270 - normalizedRotation) % 360) + 360) % 360) / sliceAngle) %
-					items.length;
+		lastResult = {
+			winner,
+			rotation: targetRotation,
+			timestamp: Date.now(),
+			wasRigged: isRigMode ?? false
+		};
 
-				// 🎉 Set winner and show modal
-				winner = items[winnerIndex];
-				showModal = true; // This triggers the modal via $bindable
-			}
-		}
-
-		requestAnimationFrame(animate);
+		showModal = false;
+		showModal = true;
+		onSpinComplete?.(lastResult);
 	}
 
-	// Generate wheel slices
-	function getSlices() {
-		if (items.length === 0) return [];
-		const sliceAngle = (2 * Math.PI) / items.length;
+	function animateSpin(start: number, end: number): Promise<void> {
+		return new Promise((resolve) => {
+			const startTime = performance.now();
+			const diff = end - start;
 
-		return items.map((item, index) => {
-			const startAngle = index * sliceAngle - Math.PI / 2; // Start from top
-			const endAngle = (index + 1) * sliceAngle - Math.PI / 2;
+			function frame(now: number) {
+				const elapsed = now - startTime;
+				const progress = Math.min(elapsed / spinDuration, 1);
 
-			const x1 = centerX + radius * Math.cos(startAngle);
-			const y1 = centerY + radius * Math.sin(startAngle);
-			const x2 = centerX + radius * Math.cos(endAngle);
-			const y2 = centerY + radius * Math.sin(endAngle);
+				// Ease-out cubic for realistic deceleration
+				const easeOut = 1 - Math.pow(1 - progress, 3);
+				rotation = start + diff * easeOut;
 
-			const largeArc = sliceAngle > Math.PI ? 1 : 0;
-
-			const midAngle = (startAngle + endAngle) / 2;
-			const textX = centerX + radius * 0.6 * Math.cos(midAngle);
-			const textY = centerY + radius * 0.6 * Math.sin(midAngle);
-			const textRotation = (midAngle * 180) / Math.PI + 90;
-
-			return {
-				path: `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`,
-				color: sliceColors[index % sliceColors.length],
-				text: item,
-				textX,
-				textY,
-				textRotation
-			};
+				if (progress < 1) {
+					requestAnimationFrame(frame);
+				} else {
+					resolve();
+				}
+			}
+			requestAnimationFrame(frame);
 		});
 	}
 
-	function closeModal() {
-		showModal = false;
-		winner = null;
+	// Snippets for modal
+
+	// Generate slices for rendering
+	function getSlices() {
+		if (items.length === 0) return [];
+		return items.map((item, index) => {
+			const {
+				x,
+				y,
+				rotation: textRot
+			} = getTextPosition(index, items.length, radius, centerX, centerY);
+			return {
+				path: generateSlicePath(index, items.length, radius, centerX, centerY),
+				color: getColorForItem(index),
+				text: item,
+				textX: x,
+				textY: y,
+				textRotation: textRot
+			};
+		});
 	}
 </script>
 
@@ -142,41 +148,36 @@
 {/snippet}
 
 {#snippet modalFooter()}
-	<button
-		class="modal-close-btn"
-		onclick={() => {
-			showModal = false;
-			spinWheel();
-		}}
-	>
-		Spin Again!
-	</button>
+	<button class="modal-close-btn" onclick={() => (showModal = false)}>Spin Again!</button>
 {/snippet}
 
 <div class="wheel-container">
-	<!-- Item Management Panel -->
+	<!-- Controls Panel -->
 	<div class="controls">
-		<h3>📝 Add Items</h3>
+		<h3>📝 Items</h3>
+
 		<div class="input-group">
 			<textarea
-				bind:value={newItem}
-				placeholder="Enter item and press Enter..."
-				rows="3"
+				bind:value={newItemLabel}
+				placeholder="Enter item + press Enter..."
+				rows="2"
 				onkeydown={handleKeydown}
 				disabled={isSpinning}
 			></textarea>
-			<button onclick={addItem} disabled={isSpinning || !newItem.trim()}> Add </button>
+			<button onclick={addItem} disabled={isSpinning || !newItemLabel.trim()}>Add</button>
 		</div>
 
 		<div class="items-list">
 			{#if items.length === 0}
-				<p class="empty">No items yet. Add some!</p>
+				<p class="empty">Add items to start!</p>
 			{:else}
-				{#each items as item, index}
+				{#each items as item}
 					<div class="item-row">
-						<span>{index + 1}. {item}</span>
-						<button class="remove-btn" onclick={() => removeItem(index)} disabled={isSpinning}
-							>✕</button
+						<span>{item}</span>
+						<button
+							class="remove-btn"
+							onclick={() => removeItem(items.indexOf(item))}
+							disabled={isSpinning}>✕</button
 						>
 					</div>
 				{/each}
@@ -186,13 +187,15 @@
 		<button class="spin-btn" onclick={spinWheel} disabled={isSpinning || items.length < 2}>
 			{isSpinning ? '🎡 Spinning...' : '🎰 SPIN!'}
 		</button>
+
+		{#if config.enabled}
+			<p class="rig-indicator">🎯 Rig mode active</p>
+		{/if}
 	</div>
 
-	<!-- Wheel Visualization -->
+	<!-- Wheel -->
 	<div class="wheel-wrapper">
-		<!-- Pointer indicator -->
 		<div class="pointer">▼</div>
-
 		<svg
 			width={centerX * 2}
 			height={centerY * 2}
@@ -207,7 +210,7 @@
 					transform="rotate({slice.textRotation} {slice.textX} {slice.textY})"
 					text-anchor="middle"
 					dominant-baseline="middle"
-					font-size="12"
+					font-size="11"
 					font-weight="bold"
 					fill="#fff"
 					style="text-shadow: 1px 1px 2px rgba(0,0,0,0.5);"
@@ -215,17 +218,20 @@
 					{slice.text}
 				</text>
 			{/each}
-
-			<!-- Center circle -->
 			<circle cx={centerX} cy={centerY} r="25" fill="#333" stroke="#fff" stroke-width="3" />
 		</svg>
 	</div>
+	Rotations: {(rotation % 360).toFixed(2)}°
 </div>
 
+<!-- Winner Modal -->
 <Modal open={showModal} header={modalHeader} footer={modalFooter}>
 	{#snippet children()}
 		<p class="winner-message">The wheel has spoken:</p>
-		<span class="winner-name">{winner}</span>
+		<span class="winner-name">{lastResult?.winner}</span>
+		{#if lastResult?.wasRigged}
+			<p class="rigged-badge">🎯 Rigged result</p>
+		{/if}
 	{/snippet}
 </Modal>
 
@@ -238,19 +244,16 @@
 		margin: 0 auto;
 		font-family: system-ui, sans-serif;
 	}
-
 	.controls {
 		flex: 1;
 		min-width: 250px;
 	}
-
 	.input-group {
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
 		margin-bottom: 1rem;
 	}
-
 	textarea {
 		padding: 0.5rem;
 		border: 2px solid #ddd;
@@ -258,12 +261,10 @@
 		font-size: 1rem;
 		resize: vertical;
 	}
-
 	textarea:disabled {
 		background: #f5f5f5;
 		cursor: not-allowed;
 	}
-
 	button {
 		padding: 0.5rem 1rem;
 		background: #4ecdc4;
@@ -274,16 +275,13 @@
 		cursor: pointer;
 		transition: background 0.2s;
 	}
-
 	button:hover:not(:disabled) {
 		background: #45b7d1;
 	}
-
 	button:disabled {
 		background: #ccc;
 		cursor: not-allowed;
 	}
-
 	.items-list {
 		max-height: 200px;
 		overflow-y: auto;
@@ -292,7 +290,6 @@
 		border-radius: 6px;
 		padding: 0.5rem;
 	}
-
 	.item-row {
 		display: flex;
 		justify-content: space-between;
@@ -300,33 +297,34 @@
 		padding: 0.25rem 0.5rem;
 		border-radius: 4px;
 	}
-
 	.item-row:hover {
 		background: #f9f9f9;
 	}
-
 	.remove-btn {
 		background: #ff6b6b;
 		padding: 0.2rem 0.5rem;
 		font-size: 0.9rem;
 	}
-
 	.remove-btn:hover:not(:disabled) {
 		background: #ee5a5a;
 	}
-
 	.spin-btn {
 		width: 100%;
 		padding: 1rem;
 		font-size: 1.2rem;
 		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 	}
-
 	.spin-btn:hover:not(:disabled) {
 		background: linear-gradient(135deg, #5568d3 0%, #663d91 100%);
 		transform: translateY(-1px);
 	}
-
+	.rig-indicator {
+		text-align: center;
+		color: #666;
+		font-size: 0.9rem;
+		margin-top: 0.5rem;
+		font-style: italic;
+	}
 	.wheel-wrapper {
 		flex: 1;
 		display: flex;
@@ -334,7 +332,6 @@
 		align-items: center;
 		position: relative;
 	}
-
 	.pointer {
 		position: absolute;
 		top: -10px;
@@ -345,19 +342,44 @@
 		z-index: 10;
 		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 	}
-
 	.wheel-svg {
-		transition: transform 0s; /* We animate via JS for precise control */
 		filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
 	}
-
 	.empty {
 		color: #999;
 		font-style: italic;
 		text-align: center;
 		padding: 1rem;
 	}
-
+	.winner-name {
+		display: block;
+		font-size: 2rem;
+		font-weight: 800;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+		margin: 0.5rem 0;
+		animation: pulse 1.5s ease-in-out infinite;
+	}
+	.rigged-badge {
+		background: #fff3cd;
+		color: #856404;
+		padding: 0.25rem 0.75rem;
+		border-radius: 20px;
+		font-size: 0.9rem;
+		display: inline-block;
+		margin-top: 0.5rem;
+	}
+	@keyframes pulse {
+		0%,
+		100% {
+			transform: scale(1);
+		}
+		50% {
+			transform: scale(1.05);
+		}
+	}
 	@media (max-width: 700px) {
 		.wheel-container {
 			flex-direction: column;
